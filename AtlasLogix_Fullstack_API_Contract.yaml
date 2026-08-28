@@ -1,0 +1,717 @@
+openapi: 3.1.0
+info:
+  title: AtlasLogix Senior Full-stack Assessment Contract
+  version: 1.0.0
+  description: >-
+    Required public HTTP contract for the fictional AtlasLogix hiring assessment.
+    Candidates may add fields and endpoints, but must preserve the documented
+    routes, status semantics, tenant isolation, and error codes.
+servers:
+  - url: http://localhost:8080
+    description: Required reproducible local deployment
+security:
+  - bearerAuth: []
+tags:
+  - name: Authentication
+  - name: Tenants
+  - name: Shipments
+  - name: Compliance
+  - name: Audit
+  - name: Streaming
+  - name: Telemetry
+  - name: Health
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      security: []
+      summary: Process liveness
+      responses:
+        "200":
+          description: Edge and application process are alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /health/ready:
+    get:
+      tags: [Health]
+      security: []
+      summary: Required dependencies are ready
+      responses:
+        "200":
+          description: PostgreSQL and Redis are usable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/auth/login:
+    post:
+      tags: [Authentication]
+      security: []
+      summary: Authenticate a synthetic assessment user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated user context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthContext"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/me:
+    get:
+      tags: [Authentication]
+      summary: Return current user and active tenant memberships
+      responses:
+        "200":
+          description: Current user context
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthContextWithoutToken"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/tenants:
+    get:
+      tags: [Tenants]
+      summary: List active tenants accessible to the current user
+      responses:
+        "200":
+          description: Accessible tenants
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TenantMembership"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/tenants/{tenantId}/shipments:
+    get:
+      tags: [Shipments]
+      summary: List shipments for an accessible tenant
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ShipmentStatus"
+        - name: compliance_status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ComplianceStatus"
+        - name: warehouse
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: Case-insensitive shipment ID, cargo, origin, destination, or warehouse search
+          schema:
+            type: string
+        - name: ordering
+          in: query
+          description: "`last_updated` or `-last_updated`"
+          schema:
+            type: string
+            enum: [last_updated, -last_updated]
+            default: -last_updated
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Paginated tenant-scoped shipments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedShipments"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/shipments/{shipmentId}:
+    get:
+      tags: [Shipments]
+      summary: Return an accessible shipment
+      parameters:
+        - $ref: "#/components/parameters/ShipmentId"
+      responses:
+        "200":
+          description: Shipment detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/shipments/{shipmentId}/sensor-data:
+    get:
+      tags: [Shipments]
+      summary: Return the latest sensor reading
+      parameters:
+        - $ref: "#/components/parameters/ShipmentId"
+      responses:
+        "200":
+          description: Latest reading
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SensorReading"
+        "204":
+          description: Shipment exists and is accessible but has no readings
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/shipments/{shipmentId}/sensor-data/history:
+    get:
+      tags: [Shipments]
+      summary: Return chronological sensor history
+      parameters:
+        - $ref: "#/components/parameters/ShipmentId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Chronological readings; empty data is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SensorReading"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/shipments/{shipmentId}/compliance/approve:
+    post:
+      tags: [Compliance]
+      summary: Approve and atomically lock a pending shipment
+      description: >-
+        Requires `compliance:approve`. Sensor excursions and low confidence are
+        evidence for human judgement, not automatic API rejection rules. A
+        shipment is approvable when it is PENDING and unlocked. Exactly one of
+        concurrent or repeated attempts may succeed.
+      parameters:
+        - $ref: "#/components/parameters/ShipmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 10
+                  maxLength: 1000
+      responses:
+        "200":
+          description: Approved, locked, and audited shipment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Shipment is already approved, rejected, or locked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/shipments/{shipmentId}/compliance/report:
+    get:
+      tags: [Compliance]
+      summary: Return a computed compliance summary
+      parameters:
+        - $ref: "#/components/parameters/ShipmentId"
+      responses:
+        "200":
+          description: Compliance report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/audit-logs:
+    get:
+      tags: [Audit]
+      summary: Return an entity audit timeline
+      parameters:
+        - name: entity
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [shipment]
+        - name: entityId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reverse-chronological audit records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/stream/tickets:
+    post:
+      tags: [Streaming]
+      summary: Create a tenant-bound, short-lived, single-use WebSocket ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenantId]
+              properties:
+                tenantId:
+                  type: string
+      responses:
+        "201":
+          description: Stream ticket issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expiresAt, websocketUrl]
+                properties:
+                  ticket:
+                    type: string
+                  expiresAt:
+                    type: string
+                    format: date-time
+                  websocketUrl:
+                    type: string
+                    format: uri
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/telemetry/readings:
+    post:
+      tags: [Telemetry]
+      security: []
+      summary: Ingest an idempotent synthetic device reading through Django/DRF
+      parameters:
+        - name: X-Device-Key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TelemetryInput"
+      responses:
+        "202":
+          description: New event persisted and scheduled for publication
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelemetryAcceptance"
+        "200":
+          description: Identical event replayed without duplication
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TelemetryAcceptance"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Event identifier reused with a conflicting payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+    ShipmentId:
+      name: shipmentId
+      in: path
+      required: true
+      schema:
+        type: string
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Authenticated but permission is absent
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Record absent or outside the authenticated tenant scope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ServiceUnavailable:
+      description: A required dependency is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    AuthContext:
+      allOf:
+        - $ref: "#/components/schemas/AuthContextWithoutToken"
+        - type: object
+          required: [token]
+          properties:
+            token:
+              type: string
+    AuthContextWithoutToken:
+      type: object
+      required: [email, userId, tenantId, role, permissions, tenants]
+      properties:
+        email:
+          type: string
+          format: email
+        userId:
+          type: string
+        tenantId:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        permissions:
+          type: array
+          items:
+            type: string
+        tenants:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantMembership"
+    TenantMembership:
+      type: object
+      required: [tenantId, name, region, role, permissions]
+      properties:
+        tenantId:
+          type: string
+        name:
+          type: string
+        region:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        permissions:
+          type: array
+          items:
+            type: string
+    Role:
+      type: string
+      enum:
+        - TENANT_ADMIN
+        - COMPLIANCE_AUDITOR
+        - OPERATIONS_MANAGER
+        - WAREHOUSE_SUPERVISOR
+        - VIEWER
+    ShipmentStatus:
+      type: string
+      enum: [IN_TRANSIT, AT_WAREHOUSE, DELIVERED, DELAYED]
+    ComplianceStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED]
+    Shipment:
+      type: object
+      required:
+        - shipmentId
+        - tenantId
+        - trackingReference
+        - origin
+        - destination
+        - cargoType
+        - status
+        - complianceStatus
+        - warehouse
+        - requiredTemperatureMin
+        - requiredTemperatureMax
+        - requiredHumidityMin
+        - requiredHumidityMax
+        - lastUpdated
+      properties:
+        shipmentId:
+          type: string
+        tenantId:
+          type: string
+        trackingReference:
+          type: string
+        origin:
+          type: string
+        destination:
+          type: string
+        carrier:
+          type: string
+        cargoType:
+          type: string
+        status:
+          $ref: "#/components/schemas/ShipmentStatus"
+        complianceStatus:
+          $ref: "#/components/schemas/ComplianceStatus"
+        warehouse:
+          type: string
+        requiredTemperatureMin:
+          type: number
+        requiredTemperatureMax:
+          type: number
+        requiredHumidityMin:
+          type: integer
+        requiredHumidityMax:
+          type: integer
+        estimatedArrival:
+          type: [string, "null"]
+          format: date-time
+        lastUpdated:
+          type: string
+          format: date-time
+        lockedAt:
+          type: [string, "null"]
+          format: date-time
+        approvedBy:
+          type: [string, "null"]
+    SensorReading:
+      type: object
+      required:
+        - eventId
+        - shipmentId
+        - temperature
+        - humidity
+        - confidence
+        - recordedAt
+      properties:
+        eventId:
+          type: string
+        shipmentId:
+          type: string
+        temperature:
+          type: number
+        humidity:
+          type: integer
+        vibration:
+          type: [number, "null"]
+        batteryLevel:
+          type: [integer, "null"]
+        confidence:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        recordedAt:
+          type: string
+          format: date-time
+    PaginatedShipments:
+      type: object
+      required: [count, page, pageSize, results]
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shipment"
+    ComplianceReport:
+      type: object
+      required:
+        - shipmentId
+        - complianceStatus
+        - sensorEventCount
+        - hasTemperatureExcursion
+        - hasHumidityExcursion
+        - generatedAt
+      properties:
+        shipmentId:
+          type: string
+        complianceStatus:
+          $ref: "#/components/schemas/ComplianceStatus"
+        latestReading:
+          anyOf:
+            - $ref: "#/components/schemas/SensorReading"
+            - type: "null"
+        sensorEventCount:
+          type: integer
+        hasTemperatureExcursion:
+          type: boolean
+        hasHumidityExcursion:
+          type: boolean
+        generatedAt:
+          type: string
+          format: date-time
+    AuditEntry:
+      type: object
+      required: [auditId, tenantId, entity, entityId, field, actorUserId, timestamp]
+      properties:
+        auditId:
+          type: string
+        tenantId:
+          type: string
+        entity:
+          type: string
+        entityId:
+          type: string
+        field:
+          type: string
+        before:
+          type: [string, "null"]
+        after:
+          type: [string, "null"]
+        actorUserId:
+          type: string
+        reason:
+          type: [string, "null"]
+        timestamp:
+          type: string
+          format: date-time
+    TelemetryInput:
+      allOf:
+        - $ref: "#/components/schemas/SensorReading"
+    TelemetryAcceptance:
+      type: object
+      required: [eventId, accepted, replayed]
+      properties:
+        eventId:
+          type: string
+        accepted:
+          type: boolean
+        replayed:
+          type: boolean

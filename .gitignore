@@ -1,0 +1,43 @@
+# Environment & Live Secrets
+.env
+*.env.local
+
+# Databases & Media
+*.sqlite3
+*.db
+backend/db.sqlite3
+
+# Node & Frontend dependencies
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Python & Django Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+backend/__pycache__/
+backend/*/__pycache__/
+
+# Playwright & Testing Outputs
+test-results/
+playwright-report/
+tests_e2e/node_modules/
+blob-report/
+
+# OS Metadata
+.DS_Store
+Thumbs.db
+
+# Assessment Raw Reference Specifications & Assets
+AtlasLogix_Brand_Guidelines.pdf
+AtlasLogix_Figma_Reference.txt
+AtlasLogix_Fullstack_UI_Acceptance_Criteria.md
+AtlasLogix_Offline_Design/
+AtlasLogix_Offline_Design_Reference.pdf
+AtlasLogix_Reproducible_Deployment_Guide.md
+AtlasLogix_Senior_Fullstack_Assessment_Design.fig
+AtlasLogix_Senior_Fullstack_Assessment_REDA-HAFEZ.docx
+AtlasLogix_WebSocket_Protocol.md

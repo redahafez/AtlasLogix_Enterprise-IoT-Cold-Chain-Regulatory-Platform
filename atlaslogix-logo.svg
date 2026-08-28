@@ -1,0 +1,24 @@
+<svg width="520" height="140" viewBox="0 0 520 140" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="140" y2="140" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#14B8A6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Mark -->
+  <rect x="16" y="16" width="108" height="108" rx="26" fill="url(#g1)"/>
+  <!-- Compass / route motif -->
+  <path d="M70 38 C92 58, 92 82, 70 102 C48 82, 48 58, 70 38 Z" fill="white" opacity="0.92"/>
+  <path d="M70 54 L86 70 L70 86 L54 70 Z" fill="#1E3A8A" opacity="0.95"/>
+  <circle cx="70" cy="70" r="6" fill="white"/>
+
+  <!-- Wordmark -->
+  <text x="148" y="78" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial" font-size="44" font-weight="700" fill="#0F172A">
+    Atlas<tspan fill="#2563EB">Logix</tspan>
+  </text>
+
+  <text x="150" y="106" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial" font-size="14" font-weight="500" fill="#475569">
+    Tracking &amp; Compliance Platform
+  </text>
+</svg>

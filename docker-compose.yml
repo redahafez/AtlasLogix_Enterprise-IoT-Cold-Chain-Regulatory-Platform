@@ -1,0 +1,78 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: atlaslogix_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-atlaslogix}
+      POSTGRES_USER: ${POSTGRES_USER:-atlaslogix_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atlaslogix_secure_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-atlaslogix_user} -d ${POSTGRES_DB:-atlaslogix}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: atlaslogix_redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: atlaslogix_backend
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-django-insecure-atlaslogix-default-assessment-key}
+      DEBUG: ${DEBUG:-False}
+      ALLOWED_HOSTS: "*"
+      POSTGRES_DB: ${POSTGRES_DB:-atlaslogix}
+      POSTGRES_USER: ${POSTGRES_USER:-atlaslogix_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-atlaslogix_secure_password}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+    command: >
+      sh -c "python manage.py makemigrations core &&
+             python manage.py migrate --noinput &&
+             python manage.py import_seed &&
+             daphne -b 0.0.0.0 -p 8000 atlaslogix.asgi:application"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: atlaslogix_frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NEXT_PUBLIC_WS_URL: ws://localhost:8080
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: atlaslogix_nginx
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
