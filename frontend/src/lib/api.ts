@@ -129,6 +129,30 @@ class APIClient {
       body: JSON.stringify({ tenantId }),
     });
   }
+
+  async ingestTelemetry(
+    payload: {
+      eventId: string;
+      shipmentId: string;
+      temperature: number;
+      humidity: number;
+      vibration?: number | null;
+      batteryLevel?: number | null;
+      confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+      recordedAt: string;
+    },
+    deviceKey = 'atl_dev_lh-LVBJpRSznXuZKgqsT_dRyqeC1JVyh'
+  ): Promise<{ eventId: string; accepted: boolean; replayed: boolean }> {
+    return this.request<{ eventId: string; accepted: boolean; replayed: boolean }>('/api/v1/telemetry/readings', {
+      method: 'POST',
+      headers: {
+        'X-Device-Key': deviceKey,
+        'Idempotency-Key': payload.eventId,
+      },
+      body: JSON.stringify(payload),
+    });
+  }
 }
 
 export const api = new APIClient();
+
