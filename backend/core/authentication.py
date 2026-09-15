@@ -48,6 +48,14 @@ class JWTAuthentication(BaseAuthentication):
         except User.DoesNotExist:
             raise AuthenticationFailed({'error': 'UNAUTHORIZED', 'message': 'User no longer exists'})
 
+        if not user.is_active:
+            raise AuthenticationFailed({'error': 'UNAUTHORIZED', 'message': 'User account is deactivated'})
+
         # Store token-provided tenant context if present
         request.active_tenant_id = payload.get('tenant_id')
         return (user, token)
+
+    def authenticate_header(self, request):
+        return 'Bearer realm="api"'
+
+

@@ -1,18 +1,32 @@
 import json
 import os
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 from core.models import (
-    Tenant, User, TenantMembership, Device, Shipment, SensorReading, AuditEntry
+    Tenant, User, TenantMembership, Device, Shipment, SensorReading, AuditEntry, ComplianceStatus
 )
 
 def parse_iso_datetime(dt_str):
     if not dt_str:
         return None
     return datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+
+def compute_telemetry_hash(shipment_id, temperature, humidity, vibration, battery_level, confidence, recorded_at_str):
+    payload_data = {
+        'shipmentId': shipment_id,
+        'temperature': float(temperature),
+        'humidity': int(humidity),
+        'vibration': float(vibration) if vibration is not None else None,
+        'batteryLevel': int(battery_level) if battery_level is not None else None,
+        'confidence': str(confidence),
+        'recordedAt': recorded_at_str,
+    }
+    return hashlib.sha256(json.dumps(payload_data, sort_keys=True).encode()).hexdigest()
+
 
 class Command(BaseCommand):
     help = 'Import seed data idempotently from JSON file'
@@ -101,9 +115,25 @@ class Command(BaseCommand):
                 tenant = Tenant.objects.get(tenant_id=s['tenantId'])
                 approved_by_user = User.objects.filter(user_id=s['approvedBy']).first() if s.get('approvedBy') else None
 
-                Shipment.objects.update_or_create(
-                    shipment_id=s['shipmentId'],
-                    defaults={
+                existing_shipment = Shipment.objects.filter(shipment_id=s['shipmentId']).first()
+                if existing_shipment and (existing_shipment.compliance_status == ComplianceStatus.APPROVED or existing_shipment.locked_at is not None):
+                    defaults = {
+                        'tenant': tenant,
+                        'tracking_reference': s['trackingReference'],
+                        'origin': s['origin'],
+                        'destination': s['destination'],
+                        'carrier': s['carrier'],
+                        'cargo_type': s['cargoType'],
+                        'status': s['status'],
+                        'warehouse': s['warehouse'],
+                        'required_temperature_min': s['requiredTemperatureMin'],
+                        'required_temperature_max': s['requiredTemperatureMax'],
+                        'required_humidity_min': s['requiredHumidityMin'],
+                        'required_humidity_max': s['requiredHumidityMax'],
+                        'estimated_arrival': parse_iso_datetime(s.get('estimatedArrival')),
+                    }
+                else:
+                    defaults = {
                         'tenant': tenant,
                         'tracking_reference': s['trackingReference'],
                         'origin': s['origin'],
@@ -122,11 +152,26 @@ class Command(BaseCommand):
                         'locked_at': parse_iso_datetime(s.get('lockedAt')),
                         'approved_by': approved_by_user,
                     }
+
+                Shipment.objects.update_or_create(
+                    shipment_id=s['shipmentId'],
+                    defaults=defaults
                 )
 
             # 6. Sensor Readings
             for sr in data.get('sensorReadings', []):
                 shipment = Shipment.objects.get(shipment_id=sr['shipmentId'])
+                recorded_at = parse_iso_datetime(sr['recordedAt'])
+                payload_hash = compute_telemetry_hash(
+                    shipment_id=sr['shipmentId'],
+                    temperature=sr['temperature'],
+                    humidity=sr['humidity'],
+                    vibration=sr.get('vibration'),
+                    battery_level=sr.get('batteryLevel'),
+                    confidence=sr['confidence'],
+                    recorded_at_str=recorded_at.isoformat()
+                )
+
                 SensorReading.objects.update_or_create(
                     event_id=sr['eventId'],
                     defaults={
@@ -136,9 +181,11 @@ class Command(BaseCommand):
                         'vibration': sr.get('vibration'),
                         'battery_level': sr.get('batteryLevel'),
                         'confidence': sr['confidence'],
-                        'recorded_at': parse_iso_datetime(sr['recordedAt']),
+                        'recorded_at': recorded_at,
+                        'payload_hash': payload_hash,
                     }
                 )
+
 
             # 7. Audit Entries
             for a in data.get('auditEntries', []):

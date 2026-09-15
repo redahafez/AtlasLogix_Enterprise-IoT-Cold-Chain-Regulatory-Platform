@@ -1,7 +1,9 @@
 import json
 import hashlib
 import uuid
+import redis
 from datetime import datetime, timedelta, timezone
+from django.conf import settings
 from django.utils import timezone as django_timezone
 from django.db import transaction, connection
 from django.db.models import Q
@@ -18,11 +20,25 @@ from core.models import (
 )
 from core.serializers import (
     UserAuthContextSerializer, ShipmentSerializer, SensorReadingSerializer,
-    AuditEntrySerializer, ComplianceReportSerializer, TenantMembershipSerializer
+    AuditEntrySerializer, ComplianceReportSerializer, TenantMembershipSerializer,
+    TelemetryInputSerializer
 )
 from core.authentication import generate_jwt_token
 from core.permissions import has_tenant_permission, get_user_tenant_membership
 from core.pagination import StandardPageNumberPagination
+
+
+def compute_telemetry_hash(shipment_id, temperature, humidity, vibration, battery_level, confidence, recorded_at_str):
+    payload_data = {
+        'shipmentId': shipment_id,
+        'temperature': float(temperature),
+        'humidity': int(humidity),
+        'vibration': float(vibration) if vibration is not None else None,
+        'batteryLevel': int(battery_level) if battery_level is not None else None,
+        'confidence': str(confidence),
+        'recordedAt': recorded_at_str,
+    }
+    return hashlib.sha256(json.dumps(payload_data, sort_keys=True).encode()).hexdigest()
 
 
 class HealthLiveView(APIView):
@@ -43,20 +59,24 @@ class HealthReadyView(APIView):
                 cursor.execute("SELECT 1")
             checks['database'] = 'ok'
         except Exception:
+            checks['database'] = 'failed'
             return Response(
-                {'error': 'SERVICE_UNAVAILABLE', 'message': 'Database connection failed'},
+                {'error': 'SERVICE_UNAVAILABLE', 'message': 'Database connection failed', 'checks': checks},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
         # 2. Check Redis / Channel Layer
+        redis_url = getattr(settings, 'REDIS_URL', None) or 'redis://localhost:6379/0'
         try:
-            channel_layer = get_channel_layer()
-            if hasattr(channel_layer, 'connection'):
-                channel_layer.connection.ping()
+            r = redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
+            r.ping()
             checks['redis'] = 'ok'
         except Exception:
-            # Fallback for channel layer
-            checks['redis'] = 'ok'
+            checks['redis'] = 'failed'
+            return Response(
+                {'error': 'SERVICE_UNAVAILABLE', 'message': 'Redis connection failed', 'checks': checks},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
 
         return Response({'status': 'ok', 'checks': checks})
 
@@ -88,6 +108,12 @@ class LoginView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
+        if not user.is_active:
+            return Response(
+                {'error': 'UNAUTHORIZED', 'message': 'User account is deactivated'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
         first_membership = user.memberships.first()
         tenant_id = first_membership.tenant_id if first_membership else None
 
@@ -97,6 +123,7 @@ class LoginView(APIView):
         response_data = serializer.data
         response_data['token'] = token
         return Response(response_data, status=status.HTTP_200_OK)
+
 
 
 class AuthMeView(APIView):
@@ -409,44 +436,68 @@ class TelemetryIngestionView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED
             )
 
-        data = request.data
-        event_id = data.get('eventId')
-        shipment_id = data.get('shipmentId')
-
-        if not event_id or not shipment_id:
+        # 2. Strict Schema Validation with TelemetryInputSerializer
+        serializer = TelemetryInputSerializer(data=request.data)
+        if not serializer.is_valid():
             return Response(
-                {'error': 'BAD_REQUEST', 'message': 'eventId and shipmentId are required'},
+                {'error': 'BAD_REQUEST', 'message': 'Invalid telemetry input', 'details': serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 2. Rule: eventId and Idempotency-Key must match
+        validated_data = serializer.validated_data
+        event_id = validated_data['eventId']
+        shipment_id = validated_data['shipmentId']
+
+        # 3. Rule: eventId and Idempotency-Key must match
         if event_id != idempotency_key:
             return Response(
                 {'error': 'BAD_REQUEST', 'message': 'eventId and Idempotency-Key header must match'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 3. Rule: Shipment must belong to device's tenant
+        # 4. Rule: Shipment must belong to device's tenant
         try:
             shipment = Shipment.objects.get(shipment_id=shipment_id, tenant_id=device.tenant_id)
         except Shipment.DoesNotExist:
             raise NotFound({'error': 'NOT_FOUND', 'message': 'Shipment not found'})
 
-        # Hash payload for idempotency check
-        payload_data = {
-            'temperature': data.get('temperature'),
-            'humidity': data.get('humidity'),
-            'vibration': data.get('vibration'),
-            'batteryLevel': data.get('batteryLevel'),
-            'confidence': data.get('confidence'),
-            'recordedAt': data.get('recordedAt'),
-        }
-        payload_hash = hashlib.sha256(json.dumps(payload_data, sort_keys=True).encode()).hexdigest()
+        # Hash payload for idempotency check including shipmentId
+        recorded_at = validated_data['recordedAt']
+        recorded_at_iso = recorded_at.isoformat()
+        payload_hash = compute_telemetry_hash(
+            shipment_id=shipment_id,
+            temperature=validated_data['temperature'],
+            humidity=validated_data['humidity'],
+            vibration=validated_data.get('vibration'),
+            battery_level=validated_data.get('batteryLevel'),
+            confidence=validated_data['confidence'],
+            recorded_at_str=recorded_at_iso
+        )
 
-        # 4. Check for existing event ID
+        # 5. Check for existing event ID
         existing_reading = SensorReading.objects.filter(event_id=event_id).first()
         if existing_reading:
-            if existing_reading.payload_hash == payload_hash or not existing_reading.payload_hash:
+            # Check 1: Shipment must match
+            if existing_reading.shipment_id != shipment_id:
+                return Response(
+                    {'error': 'EVENT_CONFLICT', 'message': 'Event identifier reused with a conflicting shipment'},
+                    status=status.HTTP_409_CONFLICT
+                )
+
+            # Check 2: Payload hash must match exactly
+            existing_hash = existing_reading.payload_hash
+            if not existing_hash:
+                existing_hash = compute_telemetry_hash(
+                    shipment_id=existing_reading.shipment_id,
+                    temperature=existing_reading.temperature,
+                    humidity=existing_reading.humidity,
+                    vibration=existing_reading.vibration,
+                    battery_level=existing_reading.battery_level,
+                    confidence=existing_reading.confidence,
+                    recorded_at_str=existing_reading.recorded_at.isoformat()
+                )
+
+            if existing_hash == payload_hash:
                 return Response({
                     'eventId': event_id,
                     'accepted': True,
@@ -458,19 +509,16 @@ class TelemetryIngestionView(APIView):
                     status=status.HTTP_409_CONFLICT
                 )
 
-        # 5. Persist event inside transaction & publish on commit
-        recorded_at_str = data.get('recordedAt')
-        recorded_at = datetime.fromisoformat(recorded_at_str.replace('Z', '+00:00')) if recorded_at_str else django_timezone.now()
-
+        # 6. Persist event inside transaction & publish on commit
         with transaction.atomic():
             reading = SensorReading.objects.create(
                 event_id=event_id,
                 shipment=shipment,
-                temperature=data.get('temperature', 0.0),
-                humidity=data.get('humidity', 0),
-                vibration=data.get('vibration'),
-                battery_level=data.get('batteryLevel'),
-                confidence=data.get('confidence', 'MEDIUM'),
+                temperature=validated_data['temperature'],
+                humidity=validated_data['humidity'],
+                vibration=validated_data.get('vibration'),
+                battery_level=validated_data.get('batteryLevel'),
+                confidence=validated_data['confidence'],
                 recorded_at=recorded_at,
                 payload_hash=payload_hash
             )
@@ -515,3 +563,4 @@ class TelemetryIngestionView(APIView):
             'accepted': True,
             'replayed': False
         }, status=status.HTTP_202_ACCEPTED)
+

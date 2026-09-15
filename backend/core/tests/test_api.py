@@ -3,8 +3,9 @@ from django.test import TestCase
 from django.core.management import call_command
 from rest_framework.test import APIClient
 from rest_framework import status
-from core.models import User, Shipment, Tenant, Device, SensorReading, ComplianceStatus, Role
+from core.models import User, Shipment, Tenant, Device, SensorReading, ComplianceStatus, Role, TenantMembership
 from core.authentication import generate_jwt_token
+
 
 class AtlasLogixAPITestCase(TestCase):
     def setUp(self):
@@ -54,15 +55,25 @@ class AtlasLogixAPITestCase(TestCase):
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_cross_tenant_isolation_returns_404(self):
-        # Auditor authenticated for TENANT-REDA-HAFEZ trying to access MENA shipment (MENA-30481)
-        client = self.get_auth_client(self.auditor_user, tenant_id='TENANT-REDA-HAFEZ')
+        # Create a single-tenant user with membership ONLY in primary_tenant
+        isolated_user = User.objects.create(
+            user_id='user-isolated-test',
+            email='isolated.auditor@atlaslogix.test'
+        )
+        TenantMembership.objects.create(
+            user=isolated_user,
+            tenant=self.primary_tenant,
+            role='COMPLIANCE_AUDITOR'
+        )
 
-        # Detail fetch for alien shipment
+        client = self.get_auth_client(isolated_user, tenant_id='TENANT-REDA-HAFEZ')
+
+        # Detail fetch for alien shipment (MENA-30481) -> must return 404 Not Found
         res = client.get('/api/v1/shipments/MENA-30481')
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(res.data['error'], 'NOT_FOUND')
 
-        # Sensor data fetch for alien shipment
+        # Sensor data fetch for alien shipment -> must return 404 Not Found
         res = client.get('/api/v1/shipments/MENA-30481/sensor-data')
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
 
@@ -154,6 +165,176 @@ class AtlasLogixAPITestCase(TestCase):
         self.assertEqual(res.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(res.data['error'], 'EVENT_CONFLICT')
 
+    def test_telemetry_altered_shipment_rejected_with_conflict_409(self):
+        # Issue 1: Changing shipment ID on a replayed event must return 409 EVENT_CONFLICT
+        device = Device.objects.get(device_id='device-REDA-HAFEZ-primary')
+        event_id = 'evt-test-altered-shipment-1002'
+
+        payload = {
+            'eventId': event_id,
+            'shipmentId': 'ALX-20481',
+            'temperature': 4.2,
+            'humidity': 50,
+            'vibration': 0.01,
+            'batteryLevel': 90,
+            'confidence': 'HIGH',
+            'recordedAt': '2026-07-12T16:00:00Z'
+        }
+
+        # 1. Initial ingestion -> 202
+        res = self.client.post(
+            '/api/v1/telemetry/readings',
+            data=payload,
+            format='json',
+            HTTP_X_DEVICE_KEY=device.device_key,
+            HTTP_IDEMPOTENCY_KEY=event_id
+        )
+        self.assertEqual(res.status_code, status.HTTP_202_ACCEPTED)
+
+        # 2. Resend with different shipment ID (ALX-20477) -> 409 Conflict
+        altered_payload = dict(payload)
+        altered_payload['shipmentId'] = 'ALX-20477'
+
+        res = self.client.post(
+            '/api/v1/telemetry/readings',
+            data=altered_payload,
+            format='json',
+            HTTP_X_DEVICE_KEY=device.device_key,
+            HTTP_IDEMPOTENCY_KEY=event_id
+        )
+        self.assertEqual(res.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(res.data['error'], 'EVENT_CONFLICT')
+
+    def test_telemetry_fixture_modified_reading_rejected_with_conflict_409(self):
+        # Issue 2: Modifying values for a pre-seeded fixture event ID must return 409 EVENT_CONFLICT
+        device = Device.objects.get(device_id='device-REDA-HAFEZ-primary')
+        fixture_reading = SensorReading.objects.first()
+        self.assertIsNotNone(fixture_reading)
+
+        conflicting_payload = {
+            'eventId': fixture_reading.event_id,
+            'shipmentId': fixture_reading.shipment_id,
+            'temperature': -999.0,
+            'humidity': 50,
+            'vibration': 0.02,
+            'batteryLevel': 80,
+            'confidence': 'HIGH',
+            'recordedAt': fixture_reading.recorded_at.isoformat()
+        }
+
+        res = self.client.post(
+            '/api/v1/telemetry/readings',
+            data=conflicting_payload,
+            format='json',
+            HTTP_X_DEVICE_KEY=device.device_key,
+            HTTP_IDEMPOTENCY_KEY=fixture_reading.event_id
+        )
+        self.assertEqual(res.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(res.data['error'], 'EVENT_CONFLICT')
+
+    def test_telemetry_validation_failures_return_400(self):
+        # Issue 3: Strict validation against schema (missing fields, invalid enum, bad date)
+        device = Device.objects.get(device_id='device-REDA-HAFEZ-primary')
+
+        # 1. Missing sensor readings (only eventId and shipmentId)
+        res = self.client.post(
+            '/api/v1/telemetry/readings',
+            data={'eventId': 'evt-val-1', 'shipmentId': 'ALX-20481'},
+            format='json',
+            HTTP_X_DEVICE_KEY=device.device_key,
+            HTTP_IDEMPOTENCY_KEY='evt-val-1'
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error'], 'BAD_REQUEST')
+
+        # 2. Confidence set to INVALID
+        res = self.client.post(
+            '/api/v1/telemetry/readings',
+            data={
+                'eventId': 'evt-val-2',
+                'shipmentId': 'ALX-20481',
+                'temperature': 5.0,
+                'humidity': 50,
+                'confidence': 'INVALID',
+                'recordedAt': '2026-07-12T17:00:00Z'
+            },
+            format='json',
+            HTTP_X_DEVICE_KEY=device.device_key,
+            HTTP_IDEMPOTENCY_KEY='evt-val-2'
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error'], 'BAD_REQUEST')
+
+        # 3. recordedAt set to not-a-date -> must return 400 Bad Request, NOT 500
+        res = self.client.post(
+            '/api/v1/telemetry/readings',
+            data={
+                'eventId': 'evt-val-3',
+                'shipmentId': 'ALX-20481',
+                'temperature': 5.0,
+                'humidity': 50,
+                'confidence': 'HIGH',
+                'recordedAt': 'not-a-date'
+            },
+            format='json',
+            HTTP_X_DEVICE_KEY=device.device_key,
+            HTTP_IDEMPOTENCY_KEY='evt-val-3'
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(res.data['error'], 'BAD_REQUEST')
+
+    def test_disabled_user_cannot_login_or_use_jwt(self):
+        # Issue 4: Deactivated account cannot authenticate via password or existing JWT
+        client = self.get_auth_client(self.auditor_user)
+
+        # Deactivate user
+        self.auditor_user.is_active = False
+        self.auditor_user.save()
+
+        # 1. Login attempt with valid password -> 401 Unauthorized
+        res = self.client.post('/api/v1/auth/login', {
+            'email': 'auditor.reda-hafez@atlaslogix.test',
+            'password': '4wLJerbLyBGBGZG8t8IIjA'
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(res.data['error'], 'UNAUTHORIZED')
+
+        # 2. Request /api/v1/auth/me with previously generated token -> 401 Unauthorized
+        res = client.get('/api/v1/auth/me')
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(res.data['error'], 'UNAUTHORIZED')
+
+    def test_reimport_seed_preserves_approval_lock(self):
+        # Issue 5: Container restart / reimporting fixture must preserve auditor approval decisions
+        auditor_client = self.get_auth_client(self.auditor_user)
+
+        # Approve shipment ALX-20481
+        res = auditor_client.post('/api/v1/shipments/ALX-20481/compliance/approve', {
+            'reason': 'Approved under strict laboratory supervision.'
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['complianceStatus'], 'APPROVED')
+
+        # Re-run seed import command (simulating container restart)
+        call_command('import_seed')
+
+        # Verify shipment in DB is still APPROVED and locked
+        shipment = Shipment.objects.get(shipment_id='ALX-20481')
+        self.assertEqual(shipment.compliance_status, ComplianceStatus.APPROVED)
+        self.assertIsNotNone(shipment.locked_at)
+        self.assertEqual(shipment.approved_by, self.auditor_user)
+
+    def test_health_ready_returns_503_when_redis_fails(self):
+        # Issue 6: When Redis ping fails, /health/ready returns 503 Service Unavailable
+        from unittest.mock import patch
+        import redis
+
+        with patch.object(redis.Redis, 'ping', side_effect=redis.ConnectionError("Redis connection refused")):
+            res = self.client.get('/health/ready')
+            self.assertEqual(res.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+            self.assertEqual(res.data['error'], 'SERVICE_UNAVAILABLE')
+            self.assertEqual(res.data['checks']['redis'], 'failed')
+
     def test_stream_ticket_issuance(self):
         client = self.get_auth_client(self.auditor_user)
 
@@ -165,3 +346,4 @@ class AtlasLogixAPITestCase(TestCase):
         self.assertIn('ticket', res.data)
         self.assertIn('websocketUrl', res.data)
         self.assertTrue(res.data['ticket'].startswith('stk_'))
+

@@ -119,3 +119,15 @@ class ComplianceReportSerializer(serializers.Serializer):
     hasTemperatureExcursion = serializers.BooleanField()
     hasHumidityExcursion = serializers.BooleanField()
     generatedAt = serializers.DateTimeField()
+
+
+class TelemetryInputSerializer(serializers.Serializer):
+    eventId = serializers.CharField(required=True, max_length=128)
+    shipmentId = serializers.CharField(required=True, max_length=128)
+    temperature = serializers.FloatField(required=True)
+    humidity = serializers.IntegerField(required=True, min_value=0, max_value=100)
+    vibration = serializers.FloatField(required=False, allow_null=True)
+    batteryLevel = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=100)
+    confidence = serializers.ChoiceField(choices=['HIGH', 'MEDIUM', 'LOW'], required=True)
+    recordedAt = serializers.DateTimeField(required=True)
+
