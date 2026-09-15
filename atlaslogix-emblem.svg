@@ -1,13 +1,85 @@
 <svg width="140" height="140" viewBox="0 0 140 140" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="g1" x1="0" y1="0" x2="140" y2="140" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2563EB"/>
-      <stop offset="1" stop-color="#14B8A6"/>
+    <!-- Background Squircle Gradient -->
+    <linearGradient id="bgGrad" x1="16" y1="16" x2="124" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#1E293B"/>
     </linearGradient>
+
+    <!-- Border Ring Gradient -->
+    <linearGradient id="borderGrad" x1="16" y1="16" x2="124" y2="124" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.8"/>
+      <stop offset="50%" stop-color="#2563EB" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#10B981" stop-opacity="0.8"/>
+    </linearGradient>
+
+    <!-- Top Facet Gradient (Sky to Blue) -->
+    <linearGradient id="facetTop" x1="39" y1="34" x2="101" y2="66" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#2563EB"/>
+    </linearGradient>
+
+    <!-- Left Facet Gradient (Deep Cobalt to Indigo) -->
+    <linearGradient id="facetLeft" x1="37" y1="54" x2="68" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1D4ED8"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+
+    <!-- Right Facet Gradient (Cyan to Emerald Compliance) -->
+    <linearGradient id="facetRight" x1="72" y1="71" x2="103" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#10B981"/>
+    </linearGradient>
+
+    <!-- Orbit Wave Gradient -->
+    <linearGradient id="orbitGrad" x1="28" y1="92" x2="114" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#10B981" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#38BDF8" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#60A5FA"/>
+    </linearGradient>
+
+    <!-- Glow Filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
   </defs>
 
-  <rect x="16" y="16" width="108" height="108" rx="26" fill="url(#g1)"/>
-  <path d="M70 38 C92 58, 92 82, 70 102 C48 82, 48 58, 70 38 Z" fill="white" opacity="0.92"/>
-  <path d="M70 54 L86 70 L70 86 L54 70 Z" fill="#1E3A8A" opacity="0.95"/>
-  <circle cx="70" cy="70" r="6" fill="white"/>
+  <!-- Modern Dark Premium Container Squircle -->
+  <rect x="16" y="16" width="108" height="108" rx="28" fill="url(#bgGrad)"/>
+  <rect x="16.75" y="16.75" width="106.5" height="106.5" rx="27.25" stroke="url(#borderGrad)" stroke-width="1.5"/>
+
+  <!-- Subtle Background Grid/Radar Accent -->
+  <circle cx="70" cy="70" r="38" stroke="#334155" stroke-width="0.75" stroke-dasharray="2 3" opacity="0.4"/>
+
+  <!-- 3D Isometric Telemetry Cube (A+L Geometry) -->
+  <g filter="drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4))">
+    <!-- Top Face (Data Nexus) -->
+    <path d="M70 34 L100 50 L70 66 L40 50 Z" fill="url(#facetTop)"/>
+    <path d="M70 34 L100 50 L70 66 L40 50 Z" stroke="#60A5FA" stroke-width="0.75" opacity="0.6"/>
+
+    <!-- Left Face ("A" Foundation & Data Route) -->
+    <path d="M38 52.5 L68 68.5 L68 104 L38 88 Z" fill="url(#facetLeft)"/>
+    <path d="M38 52.5 L68 68.5 L68 104 L38 88 Z" stroke="#3B82F6" stroke-width="0.5" opacity="0.4"/>
+
+    <!-- Right Face ("L" Trajectory & Compliance Shield) -->
+    <path d="M72 68.5 L102 52.5 L102 88 L72 104 Z" fill="url(#facetRight)"/>
+    <path d="M72 68.5 L102 52.5 L102 88 L72 104 Z" stroke="#34D399" stroke-width="0.5" opacity="0.4"/>
+
+    <!-- Dynamic Cut / Inner A-L Negative Space Lines -->
+    <path d="M53 61 L53 95" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="round" opacity="0.3"/>
+    <path d="M87 61 L87 95" stroke="#FFFFFF" stroke-width="1.75" stroke-linecap="round" opacity="0.3"/>
+  </g>
+
+  <!-- Orbital Telemetry Signal Wave -->
+  <path d="M26 84 C30 102, 60 110, 84 100 C98 94, 108 82, 114 66" stroke="url(#orbitGrad)" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M36 78 C42 62, 64 42, 90 40 C102 39, 112 44, 116 54" stroke="url(#orbitGrad)" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 3" fill="none" opacity="0.7"/>
+
+  <!-- Satellite Pulse Beacon Node -->
+  <circle cx="114" cy="66" r="3.5" fill="#38BDF8" filter="url(#glow)"/>
+  <circle cx="114" cy="66" r="1.5" fill="#FFFFFF"/>
+
+  <!-- Central Nexus Core (Live Sensor Pulse) -->
+  <circle cx="70" cy="67.5" r="4.5" fill="#0F172A" stroke="#38BDF8" stroke-width="1.5"/>
+  <circle cx="70" cy="67.5" r="2" fill="#10B981" filter="url(#glow)"/>
 </svg>
