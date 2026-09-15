@@ -155,8 +155,8 @@ docker compose up --build
 ## 🤖 AI Usage Disclosure
 
 AI assistance (Google DeepMind Antigravity AI pair programming agent) was utilized during this assessment for:
-1. Translating assessment requirements into Arabic summary documentation.
-2. Generating OpenAPI-compliant DRF serializer stubs and Django Channels ASGI consumer boilerplates.
-3. Structuring Vanilla CSS token variables from Figma `design-tokens.json`.
+1. Generating OpenAPI-compliant DRF serializer stubs and Django Channels ASGI consumer boilerplates.
+2. Structuring Vanilla CSS token variables from Figma `design-tokens.json`.
 
 All architectural decisions, security boundaries, tenant isolation logic, concurrency locking, and test assertions were reviewed, verified, and validated for correctness.
+
