@@ -3,7 +3,7 @@ from core.views import (
     HealthLiveView, HealthReadyView, LoginView, AuthMeView, TenantsListView,
     ShipmentListView, ShipmentDetailView, ShipmentLatestSensorView, ShipmentSensorHistoryView,
     ComplianceApproveView, ComplianceReportView, AuditLogsView, StreamTicketView,
-    TelemetryIngestionView
+    TelemetryIngestionView, TenantUsersListView, TenantUserDetailView, TenantUserResetPasswordView
 )
 
 urlpatterns = [
@@ -36,4 +36,10 @@ urlpatterns = [
 
     # Telemetry Ingestion
     path('api/v1/telemetry/readings', TelemetryIngestionView.as_view(), name='telemetry-readings'),
+
+    # User Management
+    path('api/v1/tenants/<str:tenantId>/users', TenantUsersListView.as_view(), name='tenant-users-list'),
+    path('api/v1/tenants/<str:tenantId>/users/<str:userId>', TenantUserDetailView.as_view(), name='tenant-user-detail'),
+    path('api/v1/tenants/<str:tenantId>/users/<str:userId>/reset-password', TenantUserResetPasswordView.as_view(), name='tenant-user-reset-password'),
 ]
+

@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 import { Shipment, PaginatedShipments } from '@/lib/types';
 import { AppShell } from '@/components/AppShell';
 import { StatusBadge } from '@/components/StatusBadge';
-import { ArrowRight, Package, Truck, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ArrowRight, Package, Truck, CheckCircle2, AlertTriangle, RefreshCw, Shield, Users, Lock } from 'lucide-react';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
 import { Doughnut } from 'react-chartjs-2';
 
@@ -80,12 +80,32 @@ export default function OverviewPage() {
             </p>
           </div>
 
-          <Link
-            href="/shipments"
-            className="px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2 self-start sm:self-auto"
-          >
-            Review shipments <ArrowRight className="w-4 h-4" />
-          </Link>
+          <div className="flex items-center gap-3 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => {
+                if (activeTenantId) {
+                  setLoading(true);
+                  api.getShipments(activeTenantId, { page_size: 20 })
+                    .then(data => setShipmentsData(data))
+                    .catch(() => setShipmentsData(null))
+                    .finally(() => setLoading(false));
+                }
+              }}
+              disabled={loading}
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5"
+              title="Refresh overview metrics"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : ''}`} />
+            </button>
+
+            <Link
+              href="/shipments"
+              className="px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
+            >
+              Review shipments <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
         </div>
 
         {/* 4 Top Metric Cards (02-dashboard.png) */}
@@ -221,7 +241,35 @@ export default function OverviewPage() {
 
         </div>
 
+        {/* Access Governance & Team Provisioning Quick Access Banner */}
+        <div className="p-6 bg-gradient-to-r from-blue-900/90 to-indigo-950/90 text-white rounded-[16px] border border-blue-800/60 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-2xl bg-blue-500/20 text-blue-300 border border-blue-400/30 shrink-0">
+              <Shield className="w-7 h-7" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <h4 className="text-base font-bold text-white">Access Governance & User Provisioning</h4>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Live RBAC
+                </span>
+              </div>
+              <p className="text-xs text-blue-200/80 max-w-xl leading-relaxed">
+                Manage operational staff, assign role permissions, reset user credentials, and enforce data isolation across your active tenant organization.
+              </p>
+            </div>
+          </div>
+
+          <Link
+            href="/administration"
+            className="px-5 py-2.5 rounded-xl bg-white text-[#0f172a] hover:bg-blue-50 font-bold text-xs shadow-md transition-all flex items-center gap-2 shrink-0 self-start md:self-auto"
+          >
+            <Users className="w-4 h-4 text-blue-600" /> Manage team access
+          </Link>
+        </div>
+
       </div>
     </AppShell>
   );
 }
+

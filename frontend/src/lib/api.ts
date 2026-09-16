@@ -1,6 +1,7 @@
 import {
   AuthContext, TenantMembership, Shipment, SensorReading,
-  ComplianceReport, AuditEntry, PaginatedShipments, APIError
+  ComplianceReport, AuditEntry, PaginatedShipments, APIError,
+  TenantUser, CreateTenantUserData, UpdateTenantUserData
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -152,7 +153,58 @@ class APIClient {
       body: JSON.stringify(payload),
     });
   }
+
+  async getTenantUsers(
+    tenantId: string,
+    params: { search?: string; role?: string; status?: string } = {}
+  ): Promise<{ data: TenantUser[]; count: number }> {
+    const searchParams = new URLSearchParams();
+    if (params.search) searchParams.append('search', params.search);
+    if (params.role) searchParams.append('role', params.role);
+    if (params.status) searchParams.append('status', params.status);
+    const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    return this.request<{ data: TenantUser[]; count: number }>(`/api/v1/tenants/${tenantId}/users${query}`);
+  }
+
+  async createTenantUser(
+    tenantId: string,
+    data: CreateTenantUserData
+  ): Promise<{ data: TenantUser; message: string }> {
+    return this.request<{ data: TenantUser; message: string }>(`/api/v1/tenants/${tenantId}/users`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateTenantUser(
+    tenantId: string,
+    userId: string,
+    data: UpdateTenantUserData
+  ): Promise<{ data: TenantUser; message: string }> {
+    return this.request<{ data: TenantUser; message: string }>(`/api/v1/tenants/${tenantId}/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async resetTenantUserPassword(
+    tenantId: string,
+    userId: string,
+    password: string
+  ): Promise<{ message: string; userId: string }> {
+    return this.request<{ message: string; userId: string }>(`/api/v1/tenants/${tenantId}/users/${userId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
+  }
+
+  async deleteTenantUser(tenantId: string, userId: string): Promise<void> {
+    return this.request<void>(`/api/v1/tenants/${tenantId}/users/${userId}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const api = new APIClient();
+
 

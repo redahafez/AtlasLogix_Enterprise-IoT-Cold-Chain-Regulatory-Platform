@@ -73,7 +73,7 @@ class Role(models.TextChoices):
 
 
 ROLE_PERMISSIONS = {
-    Role.TENANT_ADMIN: ["shipments:read", "sensor-data:read", "compliance:read", "audit-logs:read", "sensor-stream:read"],
+    Role.TENANT_ADMIN: ["shipments:read", "sensor-data:read", "compliance:read", "audit-logs:read", "sensor-stream:read", "users:read", "users:write", "users:delete"],
     Role.COMPLIANCE_AUDITOR: ["shipments:read", "sensor-data:read", "compliance:read", "compliance:approve", "audit-logs:read", "sensor-stream:read"],
     Role.OPERATIONS_MANAGER: ["shipments:read", "sensor-data:read", "compliance:read", "audit-logs:read", "sensor-stream:read"],
     Role.WAREHOUSE_SUPERVISOR: ["shipments:read", "sensor-data:read", "compliance:read", "sensor-stream:read"],

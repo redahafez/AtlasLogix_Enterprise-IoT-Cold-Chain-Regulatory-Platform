@@ -347,3 +347,85 @@ class AtlasLogixAPITestCase(TestCase):
         self.assertIn('websocketUrl', res.data)
         self.assertTrue(res.data['ticket'].startswith('stk_'))
 
+    def test_tenant_admin_can_list_users(self):
+        admin_client = self.get_auth_client(self.admin_user)
+        res = admin_client.get('/api/v1/tenants/TENANT-REDA-HAFEZ/users')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn('data', res.data)
+        self.assertGreaterEqual(res.data['count'], 5)
+        first_user = res.data['data'][0]
+        self.assertIn('userId', first_user)
+        self.assertIn('email', first_user)
+        self.assertIn('role', first_user)
+        self.assertIn('permissions', first_user)
+
+    def test_non_admin_cannot_manage_users(self):
+        viewer_client = self.get_auth_client(self.viewer_user)
+        res = viewer_client.get('/api/v1/tenants/TENANT-REDA-HAFEZ/users')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+        res = viewer_client.post('/api/v1/tenants/TENANT-REDA-HAFEZ/users', {
+            'email': 'unauthorized.user@atlaslogix.test',
+            'role': 'VIEWER'
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tenant_admin_can_create_update_and_toggle_user(self):
+        admin_client = self.get_auth_client(self.admin_user)
+
+        # 1. Create new user
+        res = admin_client.post('/api/v1/tenants/TENANT-REDA-HAFEZ/users', {
+            'email': 'new.specialist@atlaslogix.test',
+            'username': 'Tariq Specialist',
+            'role': 'OPERATIONS_MANAGER',
+            'password': 'InitialSecurePass123!',
+            'isActive': True
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        new_user_id = res.data['data']['userId']
+        self.assertEqual(res.data['data']['role'], 'OPERATIONS_MANAGER')
+
+        # 2. Update user role and status
+        res = admin_client.patch(f'/api/v1/tenants/TENANT-REDA-HAFEZ/users/{new_user_id}', {
+            'role': 'WAREHOUSE_SUPERVISOR',
+            'isActive': False
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['data']['role'], 'WAREHOUSE_SUPERVISOR')
+        self.assertFalse(res.data['data']['isActive'])
+
+        # Verify user cannot log in while inactive
+        login_res = self.client.post('/api/v1/auth/login', {
+            'email': 'new.specialist@atlaslogix.test',
+            'password': 'InitialSecurePass123!'
+        }, format='json')
+        self.assertEqual(login_res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_tenant_admin_can_reset_password(self):
+        admin_client = self.get_auth_client(self.admin_user)
+
+        # Create target user
+        admin_client.post('/api/v1/tenants/TENANT-REDA-HAFEZ/users', {
+            'email': 'reset.test@atlaslogix.test',
+            'username': 'Reset Test',
+            'role': 'VIEWER',
+            'password': 'OldPassword123!'
+        }, format='json')
+
+        user = User.objects.get(email='reset.test@atlaslogix.test')
+
+        # Admin resets password
+        res = admin_client.post(f'/api/v1/tenants/TENANT-REDA-HAFEZ/users/{user.user_id}/reset-password', {
+            'password': 'BrandNewPassword2026!'
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        # User logs in with new password
+        login_res = self.client.post('/api/v1/auth/login', {
+            'email': 'reset.test@atlaslogix.test',
+            'password': 'BrandNewPassword2026!'
+        }, format='json')
+        self.assertEqual(login_res.status_code, status.HTTP_200_OK)
+        self.assertIn('token', login_res.data)
+
+

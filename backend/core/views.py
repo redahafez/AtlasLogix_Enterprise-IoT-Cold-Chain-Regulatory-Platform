@@ -16,12 +16,13 @@ from asgiref.sync import async_to_sync
 
 from core.models import (
     User, Tenant, TenantMembership, Device, Shipment, SensorReading, AuditEntry, StreamTicket,
-    ShipmentStatus, ComplianceStatus, ROLE_PERMISSIONS
+    ShipmentStatus, ComplianceStatus, ROLE_PERMISSIONS, Role
 )
 from core.serializers import (
     UserAuthContextSerializer, ShipmentSerializer, SensorReadingSerializer,
     AuditEntrySerializer, ComplianceReportSerializer, TenantMembershipSerializer,
-    TelemetryInputSerializer
+    TelemetryInputSerializer, TenantUserSerializer, TenantUserCreateSerializer,
+    TenantUserUpdateSerializer, TenantUserPasswordResetSerializer
 )
 from core.authentication import generate_jwt_token
 from core.permissions import has_tenant_permission, get_user_tenant_membership
@@ -563,4 +564,282 @@ class TelemetryIngestionView(APIView):
             'accepted': True,
             'replayed': False
         }, status=status.HTTP_202_ACCEPTED)
+
+
+class TenantUsersListView(APIView):
+    """
+    List or invite/create users belonging to a specific tenant.
+    Requires 'users:read' for GET and 'users:write' for POST.
+    """
+    def get(self, request, tenantId):
+        membership = get_user_tenant_membership(request.user, tenantId)
+        if not membership:
+            raise NotFound({'error': 'TENANT_NOT_FOUND', 'message': 'Tenant not found or access denied'})
+
+        if not has_tenant_permission(request.user, tenantId, 'users:read'):
+            raise PermissionDenied({'error': 'FORBIDDEN', 'message': 'Permission users:read required'})
+
+        queryset = TenantMembership.objects.filter(tenant_id=tenantId).select_related('user', 'tenant')
+
+        search = request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(user__email__icontains=search) |
+                Q(user__username__icontains=search) |
+                Q(user__user_id__icontains=search)
+            )
+
+        role = request.query_params.get('role')
+        if role:
+            queryset = queryset.filter(role=role)
+
+        status_param = request.query_params.get('status')
+        if status_param == 'active':
+            queryset = queryset.filter(user__is_active=True)
+        elif status_param == 'inactive':
+            queryset = queryset.filter(user__is_active=False)
+
+        queryset = queryset.order_by('-user__date_joined')
+        serializer = TenantUserSerializer(queryset, many=True)
+        return Response({'data': serializer.data, 'count': queryset.count()}, status=status.HTTP_200_OK)
+
+    def POST(self, request, tenantId):
+        membership = get_user_tenant_membership(request.user, tenantId)
+        if not membership:
+            raise NotFound({'error': 'TENANT_NOT_FOUND', 'message': 'Tenant not found or access denied'})
+
+        if not has_tenant_permission(request.user, tenantId, 'users:write'):
+            raise PermissionDenied({'error': 'FORBIDDEN', 'message': 'Permission users:write required'})
+
+        serializer = TenantUserCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        email = data['email'].lower()
+        username = data.get('username', '')
+        role = data['role']
+        password = data.get('password') or 'AtlasLogix@2026!'
+        is_active = data.get('isActive', True)
+
+        with transaction.atomic():
+            user = User.objects.filter(email=email).first()
+            if user:
+                # Check if membership already exists
+                if TenantMembership.objects.filter(user=user, tenant_id=tenantId).exists():
+                    return Response(
+                        {'error': 'USER_ALREADY_MEMBER', 'message': f'User {email} is already a member of this tenant'},
+                        status=status.HTTP_409_CONFLICT
+                    )
+            else:
+                user_id = f"user-{email.split('@')[0]}"
+                # Handle possible collision
+                if User.objects.filter(user_id=user_id).exists():
+                    user_id = f"user-{email.split('@')[0]}-{uuid.uuid4().hex[:4]}"
+                user = User.objects.create_user(
+                    email=email,
+                    password=password,
+                    user_id=user_id,
+                    username=username,
+                    is_active=is_active
+                )
+
+            tenant = Tenant.objects.get(tenant_id=tenantId)
+            new_membership = TenantMembership.objects.create(
+                user=user,
+                tenant=tenant,
+                role=role
+            )
+
+            # Create immutable audit log entry
+            AuditEntry.objects.create(
+                audit_id=f"audit-user-{uuid.uuid4().hex[:8]}",
+                tenant=tenant,
+                entity='user',
+                entity_id=user.user_id,
+                field='membership',
+                before=None,
+                after=role,
+                actor_user=request.user,
+                reason=f"User invited to tenant {tenantId} with role {role}",
+                timestamp=django_timezone.now()
+            )
+
+        return Response({
+            'data': TenantUserSerializer(new_membership).data,
+            'message': f'User {email} successfully added with role {role}'
+        }, status=status.HTTP_201_CREATED)
+
+    # Allow post via lowercase post as well
+    post = POST
+
+
+class TenantUserDetailView(APIView):
+    """
+    Retrieve, update, or remove a tenant user membership.
+    """
+    def get(self, request, tenantId, userId):
+        if not get_user_tenant_membership(request.user, tenantId):
+            raise NotFound({'error': 'TENANT_NOT_FOUND', 'message': 'Tenant not found or access denied'})
+        if not has_tenant_permission(request.user, tenantId, 'users:read'):
+            raise PermissionDenied({'error': 'FORBIDDEN', 'message': 'Permission users:read required'})
+
+        try:
+            membership = TenantMembership.objects.select_related('user', 'tenant').get(
+                tenant_id=tenantId, user__user_id=userId
+            )
+        except TenantMembership.DoesNotExist:
+            raise NotFound({'error': 'USER_NOT_FOUND', 'message': 'User not found in this tenant'})
+
+        return Response({'data': TenantUserSerializer(membership).data}, status=status.HTTP_200_OK)
+
+    def patch(self, request, tenantId, userId):
+        if not get_user_tenant_membership(request.user, tenantId):
+            raise NotFound({'error': 'TENANT_NOT_FOUND', 'message': 'Tenant not found or access denied'})
+        if not has_tenant_permission(request.user, tenantId, 'users:write'):
+            raise PermissionDenied({'error': 'FORBIDDEN', 'message': 'Permission users:write required'})
+
+        try:
+            membership = TenantMembership.objects.select_related('user', 'tenant').get(
+                tenant_id=tenantId, user__user_id=userId
+            )
+        except TenantMembership.DoesNotExist:
+            raise NotFound({'error': 'USER_NOT_FOUND', 'message': 'User not found in this tenant'})
+
+        serializer = TenantUserUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        with transaction.atomic():
+            # Update Role
+            if 'role' in data and data['role'] != membership.role:
+                old_role = membership.role
+                new_role = data['role']
+                membership.role = new_role
+                membership.save(update_fields=['role'])
+
+                AuditEntry.objects.create(
+                    audit_id=f"audit-user-{uuid.uuid4().hex[:8]}",
+                    tenant=membership.tenant,
+                    entity='user',
+                    entity_id=membership.user.user_id,
+                    field='role',
+                    before=old_role,
+                    after=new_role,
+                    actor_user=request.user,
+                    reason=f"Role changed from {old_role} to {new_role}",
+                    timestamp=django_timezone.now()
+                )
+
+            # Update Username
+            if 'username' in data and data['username'] != membership.user.username:
+                membership.user.username = data['username']
+                membership.user.save(update_fields=['username'])
+
+            # Update Active Status
+            if 'isActive' in data and data['isActive'] != membership.user.is_active:
+                old_active = membership.user.is_active
+                new_active = data['isActive']
+                membership.user.is_active = new_active
+                membership.user.save(update_fields=['is_active'])
+
+                AuditEntry.objects.create(
+                    audit_id=f"audit-user-{uuid.uuid4().hex[:8]}",
+                    tenant=membership.tenant,
+                    entity='user',
+                    entity_id=membership.user.user_id,
+                    field='isActive',
+                    before=str(old_active),
+                    after=str(new_active),
+                    actor_user=request.user,
+                    reason=f"User status updated to {'Active' if new_active else 'Deactivated'}",
+                    timestamp=django_timezone.now()
+                )
+
+        return Response({
+            'data': TenantUserSerializer(membership).data,
+            'message': 'User updated successfully'
+        }, status=status.HTTP_200_OK)
+
+    def delete(self, request, tenantId, userId):
+        if not get_user_tenant_membership(request.user, tenantId):
+            raise NotFound({'error': 'TENANT_NOT_FOUND', 'message': 'Tenant not found or access denied'})
+        if not has_tenant_permission(request.user, tenantId, 'users:delete'):
+            raise PermissionDenied({'error': 'FORBIDDEN', 'message': 'Permission users:delete required'})
+
+        try:
+            membership = TenantMembership.objects.select_related('user', 'tenant').get(
+                tenant_id=tenantId, user__user_id=userId
+            )
+        except TenantMembership.DoesNotExist:
+            raise NotFound({'error': 'USER_NOT_FOUND', 'message': 'User not found in this tenant'})
+
+        # Prevent removing self if user is the active admin
+        if membership.user == request.user:
+            return Response(
+                {'error': 'CANNOT_REMOVE_SELF', 'message': 'Cannot remove your own administrative membership'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            old_role = membership.role
+            AuditEntry.objects.create(
+                audit_id=f"audit-user-{uuid.uuid4().hex[:8]}",
+                tenant=membership.tenant,
+                entity='user',
+                entity_id=membership.user.user_id,
+                field='membership',
+                before=old_role,
+                after='REMOVED',
+                actor_user=request.user,
+                reason=f"User membership removed from tenant {tenantId}",
+                timestamp=django_timezone.now()
+            )
+            membership.delete()
+
+        return Response({'message': 'User membership successfully removed'}, status=status.HTTP_204_NO_CONTENT)
+
+
+class TenantUserResetPasswordView(APIView):
+    """
+    Reset password for a user within a tenant.
+    Requires 'users:write' permission.
+    """
+    def post(self, request, tenantId, userId):
+        if not get_user_tenant_membership(request.user, tenantId):
+            raise NotFound({'error': 'TENANT_NOT_FOUND', 'message': 'Tenant not found or access denied'})
+        if not has_tenant_permission(request.user, tenantId, 'users:write'):
+            raise PermissionDenied({'error': 'FORBIDDEN', 'message': 'Permission users:write required'})
+
+        try:
+            membership = TenantMembership.objects.select_related('user', 'tenant').get(
+                tenant_id=tenantId, user__user_id=userId
+            )
+        except TenantMembership.DoesNotExist:
+            raise NotFound({'error': 'USER_NOT_FOUND', 'message': 'User not found in this tenant'})
+
+        serializer = TenantUserPasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        new_password = serializer.validated_data['password']
+        membership.user.set_password(new_password)
+        membership.user.save(update_fields=['password'])
+
+        AuditEntry.objects.create(
+            audit_id=f"audit-user-{uuid.uuid4().hex[:8]}",
+            tenant=membership.tenant,
+            entity='user',
+            entity_id=membership.user.user_id,
+            field='password',
+            before='[PROTECTED]',
+            after='[UPDATED]',
+            actor_user=request.user,
+            reason="User password reset by tenant administrator",
+            timestamp=django_timezone.now()
+        )
+
+        return Response({
+            'message': f'Password for user {membership.user.email} successfully reset',
+            'userId': userId
+        }, status=status.HTTP_200_OK)
+
 

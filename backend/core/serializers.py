@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from core.models import (
-    User, Tenant, TenantMembership, Shipment, SensorReading, AuditEntry, ROLE_PERMISSIONS
+    User, Tenant, TenantMembership, Shipment, SensorReading, AuditEntry, ROLE_PERMISSIONS, Role
 )
 
 class TenantMembershipSerializer(serializers.ModelSerializer):
@@ -130,4 +130,47 @@ class TelemetryInputSerializer(serializers.Serializer):
     batteryLevel = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=100)
     confidence = serializers.ChoiceField(choices=['HIGH', 'MEDIUM', 'LOW'], required=True)
     recordedAt = serializers.DateTimeField(required=True)
+
+
+class TenantUserSerializer(serializers.ModelSerializer):
+    userId = serializers.CharField(source='user.user_id')
+    email = serializers.EmailField(source='user.email')
+    username = serializers.CharField(source='user.username')
+    role = serializers.CharField()
+    roleDisplay = serializers.CharField(source='get_role_display', read_only=True)
+    tenantId = serializers.CharField(source='tenant.tenant_id')
+    tenantName = serializers.CharField(source='tenant.name', read_only=True)
+    isActive = serializers.BooleanField(source='user.is_active')
+    dateJoined = serializers.DateTimeField(source='user.date_joined')
+    lastLogin = serializers.DateTimeField(source='user.last_login', allow_null=True)
+    permissions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TenantMembership
+        fields = [
+            'userId', 'email', 'username', 'role', 'roleDisplay',
+            'tenantId', 'tenantName', 'isActive', 'dateJoined', 'lastLogin', 'permissions'
+        ]
+
+    def get_permissions(self, obj):
+        return ROLE_PERMISSIONS.get(obj.role, [])
+
+
+class TenantUserCreateSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    username = serializers.CharField(required=False, allow_blank=True, default='')
+    role = serializers.ChoiceField(choices=Role.choices, required=True)
+    password = serializers.CharField(required=False, allow_blank=True, min_length=6, write_only=True, default='AtlasLogix@2026!')
+    isActive = serializers.BooleanField(required=False, default=True)
+
+
+class TenantUserUpdateSerializer(serializers.Serializer):
+    username = serializers.CharField(required=False, allow_blank=True)
+    role = serializers.ChoiceField(choices=Role.choices, required=False)
+    isActive = serializers.BooleanField(required=False)
+
+
+class TenantUserPasswordResetSerializer(serializers.Serializer):
+    password = serializers.CharField(required=True, min_length=6, write_only=True)
+
 

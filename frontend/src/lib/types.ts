@@ -19,6 +19,35 @@ export interface TenantMembership {
   permissions: string[];
 }
 
+export interface TenantUser {
+  userId: string;
+  email: string;
+  username: string;
+  role: Role;
+  roleDisplay: string;
+  tenantId: string;
+  tenantName?: string;
+  isActive: boolean;
+  dateJoined: string;
+  lastLogin: string | null;
+  permissions: string[];
+}
+
+export interface CreateTenantUserData {
+  email: string;
+  username?: string;
+  role: Role;
+  password?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateTenantUserData {
+  username?: string;
+  role?: Role;
+  isActive?: boolean;
+}
+
+
 export interface AuthContext {
   token?: string;
   email: string;
