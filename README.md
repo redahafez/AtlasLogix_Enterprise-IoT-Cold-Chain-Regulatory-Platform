@@ -1,7 +1,7 @@
 <div align="center">
 
-# 🧊 AtlasLogix_Senior_Fullstack_Assessment_REDA-HAFEZ
-### Enterprise Cold-Chain IoT Telemetry & Regulatory Compliance Platform
+# 🧊 AtlasLogix — Enterprise IoT Cold-Chain & Regulatory Platform
+### Architected & Developed by Reda Hafez
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
