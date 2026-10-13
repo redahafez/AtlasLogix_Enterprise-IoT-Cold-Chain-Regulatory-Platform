@@ -233,4 +233,4 @@ curl -i http://localhost:8080/health/ready
 
 This project is open-source software licensed under the **[MIT License](LICENSE)**.
 
-Developed by **[Reda Hafez](https://github.com/redahafez)**.
+Developed by **[Reda Hafez](https://github.com/redahafez)** • 📬 **[reda.hafez11@gmail.com](mailto:reda.hafez11@gmail.com)**
