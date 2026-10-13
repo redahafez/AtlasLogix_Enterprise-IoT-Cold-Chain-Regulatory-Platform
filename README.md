@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧊 AtlasLogix
+# 🧊 AtlasLogix_Senior_Fullstack_Assessment_REDA-HAFEZ
 ### Enterprise Cold-Chain IoT Telemetry & Regulatory Compliance Platform
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
