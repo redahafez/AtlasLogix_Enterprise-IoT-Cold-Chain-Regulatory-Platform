@@ -152,8 +152,8 @@ graph TD
 ### 2. Clone & Launch
 ```bash
 # Clone the repository
-git clone https://github.com/redahafez/AtlasLogix_Senior_Fullstack_Assessment_REDA-HAFEZ.git
-cd AtlasLogix_Senior_Fullstack_Assessment_REDA-HAFEZ
+git clone https://github.com/redahafez/AtlasLogix_Enterprise-IoT-Cold-Chain-Regulatory-Platform.git
+cd AtlasLogix_Enterprise-IoT-Cold-Chain-Regulatory-Platform
 
 # Configure environment variables
 cp .env.example .env
