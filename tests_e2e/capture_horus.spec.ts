@@ -47,6 +47,10 @@ test.describe('Capture HorusAgent-AI High-Resolution Showcase', () => {
         path: path.join(screenshotsDir, '03-sealed-deliverable-audit.png'),
         fullPage: false,
       });
+      await page.screenshot({
+        path: path.join(screenshotsDir, '10-horus-zip-export-button.png'),
+        fullPage: false,
+      });
     }
 
     // 04: Critic Audit Report
